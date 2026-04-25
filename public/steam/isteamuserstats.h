@@ -116,11 +116,11 @@ public:
 	// Achievement / GroupAchievement metadata
 
 	// Gets the icon of the achievement, which is a handle to be used in IClientUtils::GetImageRGBA(), or 0 if none set. 
-	// A return value of 0 may indicate we are still fetching data, and you can wait for the UserAchievementIconFetched_t callback
-	// which will notify you when the bits are ready. If the callback still returns zero, then there is no image set for the
-	// specified achievement.
+	// A return value of 0 may indicate we are still fetching data, and you can wait for the UserAchievementIconReady_t callback
+	// which will notify you when the bits are actually read.  If the callback still returns zero, then there is no image set
+	// and there never will be.
 	virtual int GetAchievementIcon( const char *pchName ) = 0;
-	// Get general attributes (display name, desc, etc) for an Achievement
+	// Get general attributes (display name / text, etc) for an Achievement
 	virtual const char *GetAchievementDisplayAttribute( const char *pchName, const char *pchKey ) = 0;
 
 	// Achievement progress - triggers an AchievementProgress callback, that is all.
@@ -211,64 +211,9 @@ public:
 	// Retrieves the number of players currently playing your game (online + offline)
 	// This call is asynchronous, with the result returned in NumberOfCurrentPlayers_t
 	virtual SteamAPICall_t GetNumberOfCurrentPlayers() = 0;
-
-	// Requests that Steam fetch data on the percentage of players who have received each achievement
-	// for the game globally.
-	// This call is asynchronous, with the result returned in GlobalAchievementPercentagesReady_t.
-	virtual SteamAPICall_t RequestGlobalAchievementPercentages() = 0;
-
-	// Get the info on the most achieved achievement for the game, returns an iterator index you can use to fetch
-	// the next most achieved afterwards.  Will return -1 if there is no data on achievement 
-	// percentages (ie, you haven't called RequestGlobalAchievementPercentages and waited on the callback).
-	virtual int GetMostAchievedAchievementInfo( char *pchName, uint32 unNameBufLen, float *pflPercent, bool *pbAchieved ) = 0;
-
-	// Get the info on the next most achieved achievement for the game. Call this after GetMostAchievedAchievementInfo or another
-	// GetNextMostAchievedAchievementInfo call passing the iterator from the previous call. Returns -1 after the last
-	// achievement has been iterated.
-	virtual int GetNextMostAchievedAchievementInfo( int iIteratorPrevious, char *pchName, uint32 unNameBufLen, float *pflPercent, bool *pbAchieved ) = 0;
-
-	// Returns the percentage of users who have achieved the specified achievement.
-	virtual bool GetAchievementAchievedPercent( const char *pchName, float *pflPercent ) = 0;
-
-	// Requests global stats data, which is available for stats marked as "aggregated".
-	// This call is asynchronous, with the results returned in GlobalStatsReceived_t.
-	// nHistoryDays specifies how many days of day-by-day history to retrieve in addition
-	// to the overall totals. The limit is 60.
-	virtual SteamAPICall_t RequestGlobalStats( int nHistoryDays ) = 0;
-
-	// Gets the lifetime totals for an aggregated stat
-	virtual bool GetGlobalStat( const char *pchStatName, int64 *pData ) = 0;
-	virtual bool GetGlobalStat( const char *pchStatName, double *pData ) = 0;
-
-	// Gets history for an aggregated stat. pData will be filled with daily values, starting with today.
-	// So when called, pData[0] will be today, pData[1] will be yesterday, and pData[2] will be two days ago, 
-	// etc. cubData is the size in bytes of the pubData buffer. Returns the number of 
-	// elements actually set.
-	virtual int32 GetGlobalStatHistory( const char *pchStatName, int64 *pData, uint32 cubData ) = 0;
-	virtual int32 GetGlobalStatHistory( const char *pchStatName, double *pData, uint32 cubData ) = 0;
-
-#ifdef _PS3
-	// Call to kick off installation of the PS3 trophies. This call is asynchronous, and the results will be returned in a PS3TrophiesInstalled_t
-	// callback.
-	virtual bool InstallPS3Trophies() = 0;
-
-	// Returns the amount of space required at boot to install trophies. This value can be used when comparing the amount of space needed
-	// by the game to the available space value passed to the game at boot. The value is set during InstallPS3Trophies().
-	virtual uint64 GetTrophySpaceRequiredBeforeInstall() = 0;
-
-	// On PS3, user stats & achievement progress through Steam must be stored with the user's saved game data.
-	// At startup, before calling RequestCurrentStats(), you must pass the user's stats data to Steam via this method.
-	// If you do not have any user data, call this function with pvData = NULL and cubData = 0
-	virtual bool SetUserStatsData( const void *pvData, uint32 cubData ) = 0;
-
-	// Call to get the user's current stats data. You should retrieve this data after receiving successful UserStatsReceived_t & UserStatsStored_t
-	// callbacks, and store the data with the user's save game data. You can call this method with pvData = NULL and cubData = 0 to get the required
-	// buffer size.
-	virtual bool GetUserStatsData( void *pvData, uint32 cubData, uint32 *pcubWritten ) = 0;
-#endif
 };
 
-#define STEAMUSERSTATS_INTERFACE_VERSION "STEAMUSERSTATS_INTERFACE_VERSION010"
+#define STEAMUSERSTATS_INTERFACE_VERSION "STEAMUSERSTATS_INTERFACE_VERSION009"
 
 // callbacks
 #pragma pack( push, 8 )
@@ -388,18 +333,9 @@ struct UserAchievementIconFetched_t
 	int			m_nIconHandle;		// Handle to the image, which can be used in ClientUtils()->GetImageRGBA(), 0 means no image is set for the achievement
 };
 
-
-//-----------------------------------------------------------------------------
-// Purpose: Callback indicating that global achievement percentages are fetched
-//-----------------------------------------------------------------------------
-struct GlobalAchievementPercentagesReady_t
-{
-	enum { k_iCallback = k_iSteamUserStatsCallbacks + 10 };
-
-	uint64		m_nGameID;				// Game this is for
-	EResult		m_eResult;				// Result of the operation
-};
-
+//
+// IMPORTANT! k_iSteamUserStatsCallbacks + 10 is used, see iclientuserstats.h
+//
 
 //-----------------------------------------------------------------------------
 // Purpose: call result indicating UGC has been uploaded, returned as a result of SetLeaderboardUGC()
@@ -409,31 +345,6 @@ struct LeaderboardUGCSet_t
 	enum { k_iCallback = k_iSteamUserStatsCallbacks + 11 };
 	EResult m_eResult;				// The result of the operation
 	SteamLeaderboard_t m_hSteamLeaderboard;	// the leaderboard handle that was
-};
-
-
-//-----------------------------------------------------------------------------
-// Purpose: callback indicating that PS3 trophies have been installed
-//-----------------------------------------------------------------------------
-struct PS3TrophiesInstalled_t
-{
-	enum { k_iCallback = k_iSteamUserStatsCallbacks + 12 };
-	uint64	m_nGameID;				// Game these stats are for
-	EResult m_eResult;				// The result of the operation
-	uint64 m_ulRequiredDiskSpace;	// If m_eResult is k_EResultDiskFull, will contain the amount of space needed to install trophies
-
-};
-
-
-//-----------------------------------------------------------------------------
-// Purpose: callback indicating global stats have been received.
-//	Returned as a result of RequestGlobalStats()
-//-----------------------------------------------------------------------------
-struct GlobalStatsReceived_t
-{
-	enum { k_iCallback = k_iSteamUserStatsCallbacks + 12 };
-	uint64	m_nGameID;				// Game global stats were requested for
-	EResult	m_eResult;				// The result of the request
 };
 
 #pragma pack( pop )

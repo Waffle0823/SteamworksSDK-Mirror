@@ -58,8 +58,6 @@ public:
 	STEAM_CALLBACK( CStatsAndAchievements, OnUserStatsReceived, UserStatsReceived_t, m_CallbackUserStatsReceived );
 	STEAM_CALLBACK( CStatsAndAchievements, OnUserStatsStored, UserStatsStored_t, m_CallbackUserStatsStored );
 	STEAM_CALLBACK( CStatsAndAchievements, OnAchievementStored, UserAchievementStored_t, m_CallbackAchievementStored );
-	STEAM_CALLBACK( CStatsAndAchievements, OnPS3TrophiesInstalled, PS3TrophiesInstalled_t, m_CallbackPS3TrophiesInstalled );
-	
 
 private:
 
@@ -73,10 +71,6 @@ private:
 	// Render helpers
 	void DrawAchievementInfo( RECT &rect, Achievement_t &ach );
 	void DrawStatInfo( RECT &rect, const char *pchName, float flValue );
-
-	// PS3 specific
-	bool LoadUserStatsOnPS3();
-	bool SaveUserStatsOnPS3();
 
 	// our GameID
 	CGameID m_GameID;
@@ -112,10 +106,6 @@ private:
 	float m_flTotalFeetTraveled;
 	float m_flMaxFeetTraveled;
 	float m_flAverageSpeed;
-
-	// PS3 specific
-	bool m_bStartedPS3TrophyInstall;
-	bool m_bInstalledPS3Trophies;
 };
 
 #endif // STATS_AND_ACHIEVEMENTS_H
