@@ -1,4 +1,4 @@
-//====== Copyright © 1996-2008, Valve Corporation, All rights reserved. =======
+//====== Copyright ï¿½ 1996-2008, Valve Corporation, All rights reserved. =======
 //
 // Purpose: Main file for the SteamworksExample app
 //
@@ -6,20 +6,21 @@
 
 #include "stdafx.h"
 
-#ifdef WIN32
-#include "gameenginewin32.h"
-#elif _PS3
-#include "gameengineps3.h"
+#if defined(WIN32)
+    #include "gameenginewin32.h"
+    #define atoll _atoi64
+#elif defined(OSX)
+	#include "GameEngine.h"
+	extern IGameEngine *CreateGameEngineOSX();
 #endif
 
 #include "SpaceWarClient.h"
-
 
 //-----------------------------------------------------------------------------
 // Purpose: Wrapper around SteamAPI_WriteMiniDump which can be used directly 
 // as a se translator
 //-----------------------------------------------------------------------------
-#ifndef _PS3
+#ifdef _WIN32
 void MiniDumpFunction( unsigned int nExceptionCode, EXCEPTION_POINTERS *pException )
 {
 	// You can build and set an arbitrary comment to embed in the minidump here,
@@ -32,6 +33,19 @@ void MiniDumpFunction( unsigned int nExceptionCode, EXCEPTION_POINTERS *pExcepti
 }
 #endif
 
+
+//-----------------------------------------------------------------------------
+// Purpose: Helper to display critical errors
+//-----------------------------------------------------------------------------
+int Alert( const char *lpCaption, const char *lpText )
+{
+#ifndef _WIN32
+    fprintf( stderr, "Message: '%s', Detail: '%s'\n", lpCaption, lpText );
+	return 0;
+#else
+    return ::MessageBox( NULL, lpText, lpCaption, MB_OK );
+#endif
+}
 
 //-----------------------------------------------------------------------------
 // Purpose: callback hook for debug text emitted from the Steam API
@@ -50,55 +64,56 @@ extern "C" void __cdecl SteamAPIDebugTextHook( int nSeverity, const char *pchDeb
 	}
 }
 
+
+//-----------------------------------------------------------------------------
+// Purpose: Extracts some feature from the command line
+//-----------------------------------------------------------------------------
+void ParseCommandLine( const char *pchCmdLine, const char **ppchServerAddress, const char **ppchLobbyID )
+{
+	// Look for the +connect ipaddress:port parameter in the command line,
+	// Steam will pass this when a user has used the Steam Server browser to find
+	// a server for our game and is trying to join it. 
+	const char *pchConnectParam = "+connect";
+	const char *pchConnect = strstr( pchCmdLine, pchConnectParam );
+	*ppchServerAddress = NULL;
+	if ( pchConnect && strlen( pchCmdLine ) > (pchConnect - pchCmdLine) + strlen( pchConnectParam ) + 1 )
+	{
+		// Address should be right after the +connect, +1 on the end to skip the space
+		*ppchServerAddress = pchCmdLine + ( pchConnect - pchCmdLine ) + strlen( pchConnectParam ) + 1;
+	}
+
+	// look for +connect_lobby lobbyid paramter on the command line
+	// Steam will pass this in if a user taken up an invite to a lobby
+	const char *pchConnectLobbyParam = "+connect_lobby";
+	const char *pchConnectLobby = strstr( pchCmdLine, pchConnectParam );
+	*ppchLobbyID = NULL;
+	if ( pchConnectLobby && strlen( pchCmdLine ) > (pchConnectLobby - pchCmdLine) + strlen( pchConnectLobbyParam ) + 1 )
+	{
+		// Address should be right after the +connect, +1 on the end to skip the space
+		*ppchLobbyID = pchCmdLine + ( pchConnectLobby - pchCmdLine ) + strlen( pchConnectLobbyParam ) + 1;
+	}
+}
+
+
 //-----------------------------------------------------------------------------
 // Purpose: Main loop code shared between all platforms
 //-----------------------------------------------------------------------------
-void RunGameLoop( IGameEngine *pGameEngine, char *pchServerAddress, char *pchLobbyID  )
+void RunGameLoop( IGameEngine *pGameEngine, const char *pchServerAddress, const char *pchLobbyID )
 {
 	// Make sure it initialized ok
 	if ( pGameEngine->BReadyForUse() )
 	{
 		// Initialize the game
-		CSpaceWarClient *pGameClient = new CSpaceWarClient( pGameEngine, SteamUser()->GetSteamID() );
+		CSpaceWarClient *pGameClient = new CSpaceWarClient( pGameEngine );
 
 		// Black background
 		pGameEngine->SetBackgroundColor( 0, 0, 0, 0 );
 
 		// If +connect was used to specify a server address, connect now
-		if ( pchServerAddress )
-		{
-			int32 octet0 = 0, octet1 = 0, octet2 = 0, octet3 = 0;
-			int32 uPort = 0;
-			int nConverted = sscanf( pchServerAddress, "%d.%d.%d.%d:%d", &octet0, &octet1, &octet2, &octet3, &uPort );
-			if ( nConverted == 5 )
-			{
-				char rgchIPAddress[128];
-				_snprintf( rgchIPAddress, ARRAYSIZE( rgchIPAddress ), "%d.%d.%d.%d", octet0, octet1, octet2, octet3 );
-				uint32 unIPAddress = ( octet3 ) + ( octet2 << 8 ) + ( octet1 << 16 ) + ( octet0 << 24 );
-				pGameClient->InitiateServerConnection( unIPAddress, uPort );
-			}
-		}
-
-		// if +connect_lobby was used to specify a lobby to join, connect now
-		if ( pchLobbyID )
-		{
-#ifndef _PS3
-			CSteamID steamIDLobby( (uint64)_atoi64( pchLobbyID ) );
-#else
-			CSteamID steamIDLobby( (uint64)atoll( pchLobbyID ) );
-#endif
-			if ( steamIDLobby.IsValid() )
-			{
-				// act just like we had selected it from the menu
-				LobbyBrowserMenuItem_t menuItem = { steamIDLobby, k_EClientJoiningLobby };
-				pGameClient->OnMenuSelection( menuItem );
-			}
-		}
+		pGameClient->ExecCommandLineConnect( pchServerAddress, pchLobbyID );
 
 		// test a user specific secret before entering main loop
-#ifndef _PS3
 		Steamworks_TestSecret();
-#endif
 
 		pGameClient->RetrieveEncryptedAppTicket();
 
@@ -132,11 +147,9 @@ void RunGameLoop( IGameEngine *pGameEngine, char *pchServerAddress, char *pchLob
 //-----------------------------------------------------------------------------
 // Purpose: Real main entry point for the program
 //-----------------------------------------------------------------------------
-#ifdef WIN32
-int APIENTRY RealMain(HINSTANCE hInstance,
-	HINSTANCE hPrevInstance,
-	LPSTR     lpCmdLine,
-	int       nCmdShow)
+#ifndef _PS3
+
+static int RealMain( const char *pchCmdLine, HINSTANCE hInstance, int nCmdShow )
 {
 	
 	if ( SteamAPI_RestartAppIfNecessary( k_uAppIdInvalid ) )
@@ -155,7 +168,7 @@ int APIENTRY RealMain(HINSTANCE hInstance,
 	if ( !Steamworks_InitCEGLibrary() )
 	{
 		OutputDebugString( "Steamworks_InitCEGLibrary() failed\n" );
-		::MessageBox( NULL, "Steam must be running to play this game (InitDrmLibrary() failed).\n", "Fatal Error", MB_OK );
+		Alert( "Fatal Error", "Steam must be running to play this game (InitDrmLibrary() failed).\n" );
 		return EXIT_FAILURE;
 	}
 
@@ -169,7 +182,7 @@ int APIENTRY RealMain(HINSTANCE hInstance,
 	if ( !SteamAPI_Init() )
 	{
 		OutputDebugString( "SteamAPI_Init() failed\n" );
-		::MessageBox( NULL, "Steam must be running to play this game (SteamAPI_Init() failed).\n", "Fatal Error", MB_OK );
+		Alert( "Fatal Error", "Steam must be running to play this game (SteamAPI_Init() failed).\n" );
 		return EXIT_FAILURE;
 	}
 
@@ -183,37 +196,20 @@ int APIENTRY RealMain(HINSTANCE hInstance,
 	// with important UI in your game.
 	SteamUtils()->SetOverlayNotificationPosition( k_EPositionTopRight );
 
-	// Look for the +connect ipaddress:port parameter in the command line,
-	// Steam will pass this when a user has used the Steam Server browser to find
-	// a server for our game and is trying to join it. 
-	const char *pchConnectParam = "+connect";
-	char *pchCmdLine = ::GetCommandLine();
-	char *pchConnect = strstr( pchCmdLine, pchConnectParam );
-	char *pchServerAddress = NULL;
-	if ( pchConnect && strlen( pchCmdLine ) > (pchConnect - pchCmdLine) + strlen( pchConnectParam ) + 1 )
-	{
-		// Address should be right after the +connect, +1 on the end to skip the space
-		pchServerAddress = pchCmdLine + ( pchConnect - pchCmdLine ) + strlen( pchConnectParam ) + 1;
-	}
-
-	// look for +connect_lobby lobbyid paramter on the command line
-	// Steam will pass this in if a user taken up an invite to a lobby
-	const char *pchConnectLobbyParam = "+connect_lobby";
-	char *pchConnectLobby = strstr( pchCmdLine, pchConnectParam );
-	char *pchLobbyID = NULL;
-	if ( pchConnectLobby && strlen( pchCmdLine ) > (pchConnectLobby - pchCmdLine) + strlen( pchConnectLobbyParam ) + 1 )
-	{
-		// Address should be right after the +connect, +1 on the end to skip the space
-		pchLobbyID = pchCmdLine + ( pchConnectLobby - pchCmdLine ) + strlen( pchConnectLobbyParam ) + 1;
-	}
-
+	const char *pchServerAddress, *pchLobbyID;
+	ParseCommandLine( pchCmdLine, &pchServerAddress, &pchLobbyID );
 	// do a DRM self check
 	Steamworks_SelfCheck();
 
 	// Construct a new instance of the game engine 
 	// bugbug jmccaskey - make screen resolution dynamic, maybe take it on command line?
-	CGameEngineWin32 *pGameEngine = new CGameEngineWin32( hInstance, nCmdShow, 1024, 768 );
-
+	IGameEngine *pGameEngine = 
+#if defined(_WIN32)
+        new CGameEngineWin32( hInstance, nCmdShow, 1024, 768 );
+#elif defined(OSX)
+        CreateGameEngineOSX();
+#endif
+    
 	// This call will block and run until the game exits
 	RunGameLoop( pGameEngine, pchServerAddress, pchLobbyID );
 
@@ -248,13 +244,13 @@ int APIENTRY WinMain(HINSTANCE hInstance,
 		// We don't want to mask exceptions (or report them to Steam!) when debugging.
 		// If you would like to step through the exception handler, attach a debugger
 		// after running the game outside of the debugger.
-		return RealMain( hInstance, hPrevInstance, lpCmdLine, nCmdShow );
+		return RealMain( lpCmdLine, hInstance, nCmdShow );
 	}
 
 	_set_se_translator( MiniDumpFunction );
 	try  // this try block allows the SE translator to work
 	{
-		return RealMain( hInstance, hPrevInstance, lpCmdLine, nCmdShow );
+		return RealMain( lpCmdLine, hInstance, nCmdShow );
 	}
 	catch( ... )
 	{
@@ -263,143 +259,32 @@ int APIENTRY WinMain(HINSTANCE hInstance,
 }
 #endif
 
-
-//-----------------------------------------------------------------------------
-// Purpose: Main entry point for the program -- ps3
-//-----------------------------------------------------------------------------
-#ifdef _PS3
-
-
-//-----------------------------------------------------------------------------
-// Purpose: Loads the Steam PS3 module
-//-----------------------------------------------------------------------------
-sys_prx_id_t g_sys_prx_id_steam = -1;
-static bool LoadSteamPS3Module()
+#ifdef OSX
+int main(int argc, const char **argv)
 {
-	g_sys_prx_id_steam = sys_prx_load_module( SYS_APP_HOME "/steam_api_ps3.sprx", 0, NULL );
-	if ( g_sys_prx_id_steam < CELL_OK )
-	{
-		OutputDebugString( "LoadSteamModule() - failed to load steam_api_ps3\n" );
-		return false;
-	}
+    char szCmdLine[1024];
+    char *pszStart = szCmdLine;
+    char * const pszEnd = szCmdLine + ARRAYSIZE(szCmdLine);
 
-	int modres;
-	int res = sys_prx_start_module( g_sys_prx_id_steam, 0, NULL, &modres, 0, NULL);
-	if ( res < CELL_OK )
-	{
-		OutputDebugString( "LoadSteamModule() - failed to start steam_api_ps3\n" );
-		return false;
-	}
-	return true;
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: Unloads the Steam PS3 module
-//-----------------------------------------------------------------------------
-static bool UnloadSteamPS3Module()
-{
-	// check if loaded
-	if ( g_sys_prx_id_steam < CELL_OK )
-		return false;
-
-	int modres;
-	int res = sys_prx_stop_module( g_sys_prx_id_steam, 0, NULL, &modres, 0, NULL);
-	if ( res < CELL_OK )
-	{
-		OutputDebugString( "LoadSteamModule() - failed to stop steam_api_ps3\n" );
-		return false;
-	}
-
-	res = sys_prx_unload_module( g_sys_prx_id_steam, 0, NULL );
-	if ( res < CELL_OK )
-	{
-		OutputDebugString( "LoadSteamModule() - failed to unload steam_api_ps3\n" );
-		return false;
-	}
-
-	g_sys_prx_id_steam = -1;
-	return true;
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose: Initializes Steam PS3 params for our application
-//-----------------------------------------------------------------------------
-bool SetSteamPS3Params( SteamPS3Params_t *pParams )
-{
-	// Steam needs the system cache path
-	CellSysCacheParam sysCacheParams;
-	memset( &sysCacheParams, 0, sizeof( CellSysCacheParam ) );
-	if ( cellSysCacheMount( &sysCacheParams ) < 0 )
-		return false;
-
-	// configure the Steamworks PS3 parameters. All params need to be set
-	strncpy( pParams->m_rgchInstallationPath, SYS_APP_HOME, STEAM_PS3_PATH_MAX );
-	strncpy( pParams->m_rgchSystemCache, sysCacheParams.getCachePath, STEAM_PS3_PATH_MAX );
-
-	return true;
-}
-
-// Global for PS3 params
-SteamPS3Params_t g_SteamPS3Params;
-
-
-//-----------------------------------------------------------------------------
-// Purpose: Main entry point for the program -- ps3
-//-----------------------------------------------------------------------------
-int main( int argc, char *argv[] )
-{
-	printf( "PS3 main\n" );
-
-	// Initialize 6 SPUs but reserve 1 SPU as a raw SPU for PSGL
-	sys_spu_initialize(6, 1);	
-
-	// Load Steam
-	if ( !LoadSteamPS3Module() )
-		return EXIT_FAILURE;
-
-	// No restart app if necessary, or CEG initialization on PS3
-
-	// Initialize SteamAPI, if this fails we bail out since we depend on Steam for lots of stuff.
-	// You don't necessarily have to though if you write your code to check whether all the Steam
-	// interfaces are NULL before using them and provide alternate paths when they are unavailable.
-
-	if ( !SetSteamPS3Params( &g_SteamPS3Params ) )
-	{
-		OutputDebugString( "SetSteamPS3Params() failed\n" );
-		return EXIT_FAILURE;
-	}
-
-	if ( !SteamAPI_Init( &g_SteamPS3Params ) )
-	{
-		OutputDebugString( "SteamAPI_Init() failed\n" );
-		return EXIT_FAILURE;
-	}
-
-	// set our debug handler
-	SteamClient()->SetWarningMessageHook( &SteamAPIDebugTextHook );
-
-	// bugbug ps3
-	SteamUser()->LogOn( "jmccaskeybeta", "test123" );
-
-	// No overlay notification position setting on PS3
-
-	// No +connect support on PS3 since Steam isn't launching us
-
-	// Construct a new instance of the game engine 
-	// bugbug jmccaskey - make screen resolution dynamic, maybe take it on command line?
-	CGameEnginePS3 *pGameEngine = new CGameEnginePS3();
-
-	// This call will block and run until the game exits
-	RunGameLoop( pGameEngine, NULL, NULL );
-
-	// Shutdown the SteamAPI
-	SteamAPI_Shutdown();
-
-	// Unload Steam
-	UnloadSteamPS3Module();
-
-	// exit
-	return 0;	
+    *szCmdLine = '\0';
+    
+    for ( int i = 1; i < argc; i++ )
+    {
+        const char *parm = argv[i];
+        while ( *parm && (pszStart < pszEnd) )
+        {
+            *pszStart++ = *parm++;
+        }
+        
+        if ( pszStart >= pszEnd )
+            break;
+        
+        if ( i < argc-1 )
+            *pszStart++ = ' ';
+    }
+    
+    szCmdLine[ARRAYSIZE(szCmdLine) - 1] = '\0';
+    
+    return RealMain( szCmdLine, 0, 0 );
 }
 #endif

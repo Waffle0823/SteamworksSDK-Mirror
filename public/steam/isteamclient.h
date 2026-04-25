@@ -42,6 +42,7 @@ class ISteamApps;
 class ISteamNetworking;
 class ISteamRemoteStorage;
 class ISteamGameServerStats;
+class ISteamPS3OverlayRender;
 
 //-----------------------------------------------------------------------------
 // Purpose: Interface to creating a new steam instance, or to
@@ -130,9 +131,16 @@ public:
 	// callbacks will occur directly after the API function is called that generated the warning or message
 	virtual void SetWarningMessageHook( SteamAPIWarningMessageHook_t pFunction ) = 0;
 
+	// Trigger global shutdown for the DLL
+	virtual bool BShutdownIfAllPipesClosed() = 0;
+
+#ifdef _PS3
+	virtual ISteamPS3OverlayRender *GetISteamPS3OverlayRender() = 0;
+#endif
+
 };
 
-#define STEAMCLIENT_INTERFACE_VERSION		"SteamClient009"
+#define STEAMCLIENT_INTERFACE_VERSION		"SteamClient010"
 
 //-----------------------------------------------------------------------------
 // Purpose: Base values for callback identifiers, each callback must
