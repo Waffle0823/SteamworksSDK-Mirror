@@ -1,0 +1,78 @@
+name: Steamworks SDK Sync
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Steamworks SDK version"
+        required: true
+        type: string
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if version already exists
+        run: |
+          if git rev-parse "v${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "Tag v${{ inputs.version }} already exists. Aborting."
+            exit 1
+          fi
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "noreply@github.com"
+
+      - name: Download SDK
+        env:
+          VERSION: ${{ inputs.version }}
+          STEAM_LOGIN_SECURE: ${{ secrets.STEAM_LOGIN_SECURE }}
+        run: |
+          SDK_VERSION="${VERSION//./}"
+          curl -fL -o steamworks_sdk.zip \
+            --cookie "steamLoginSecure=${STEAM_LOGIN_SECURE}" \
+            "https://partner.steamgames.com/downloads/steamworks_sdk_${SDK_VERSION}.zip"
+          if ! file steamworks_sdk.zip | grep -qi 'zip archive'; then
+            echo "Downloaded file is not a zip archive. Aborting."
+            exit 1
+          fi
+
+      - name: Extract SDK
+        run: |
+          git ls-files -z | xargs -0 -I{} sh -c '
+            case "$1" in
+              .github/*|.gitignore|.gitattributes|README*|LICENSE*) ;;
+              *) rm -f -- "$1" ;;
+            esac
+          ' _ {}
+          mkdir -p _sdk_extract
+          unzip -o steamworks_sdk.zip -d _sdk_extract
+          rsync -a _sdk_extract/sdk/ ./
+          rm -rf _sdk_extract steamworks_sdk.zip
+
+      - name: Commit and tag
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit for v${{ inputs.version }}. Aborting."
+            exit 1
+          fi
+          git commit -m "Sync Steamworks SDK v${{ inputs.version }}"
+          git tag -a "v${{ inputs.version }}" -m "Steamworks SDK v${{ inputs.version }}"
+          git push origin HEAD
+          git push origin "v${{ inputs.version }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ inputs.version }}" \
+            --title "Steamworks SDK v${{ inputs.version }}" \
+            --notes "Mirror of the official Steamworks SDK v${{ inputs.version }}."
