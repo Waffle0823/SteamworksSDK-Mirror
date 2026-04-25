@@ -46,14 +46,17 @@ jobs:
 
       - name: Extract SDK
         run: |
-          git ls-files -z | xargs -0 -I{} sh -c '
-            case "$1" in
-              .github/*|.gitignore|.gitattributes|README*|LICENSE*) ;;
-              *) rm -f -- "$1" ;;
-            esac
-          ' _ {}
           mkdir -p _sdk_extract
           unzip -o steamworks_sdk.zip -d _sdk_extract
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name .git \
+            ! -name .github \
+            ! -name .gitignore \
+            ! -name .gitattributes \
+            ! -name 'README*' \
+            ! -name 'LICENSE*' \
+            ! -name _sdk_extract \
+            -exec rm -rf {} +
           rsync -a _sdk_extract/sdk/ ./
           rm -rf _sdk_extract steamworks_sdk.zip
 
